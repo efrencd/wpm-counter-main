@@ -42,7 +42,6 @@ Copia `.env.example` a `.env` para local y configura las mismas en Netlify Site 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_URL` (igual que `VITE_SUPABASE_URL`, usado por functions)
 
 ## Deploy en Netlify
 1. Sube repo a GitHub.
