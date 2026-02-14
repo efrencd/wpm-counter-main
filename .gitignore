@@ -10,3 +10,6 @@ netlify/functions/**/*.d.ts
 .env
 .env.*
 !.env.example
+
+# Local Netlify folder
+.netlify

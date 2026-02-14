@@ -12,6 +12,7 @@ export interface StudentRecord {
   id: string;
   class_id: string;
   display_name: string;
+  pin_plain?: string | null;
   active: boolean;
   created_at: string;
 }

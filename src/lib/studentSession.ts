@@ -5,6 +5,7 @@ export interface StudentSessionState {
   student_id: string;
   class_id: string;
   grade: number;
+  student_name: string;
 }
 
 export interface StudentReadingResult {

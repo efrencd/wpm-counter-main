@@ -1,8 +1,10 @@
 import { fail } from './http';
-import { supabaseAdmin } from './supabaseAdmin';
+import { getHeader } from './request';
+import { getSupabaseAdmin } from './supabaseAdmin';
 
 export async function requireTeacherUser(event: { headers?: Record<string, string | undefined> }) {
-  const authHeader = event.headers?.authorization || event.headers?.Authorization;
+  const supabaseAdmin = getSupabaseAdmin();
+  const authHeader = getHeader(event, 'authorization');
   const token = authHeader?.replace('Bearer ', '');
   if (!token) {
     return { error: fail('Unauthorized', 401) };

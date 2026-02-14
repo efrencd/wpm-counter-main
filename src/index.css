@@ -1,7 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+}
+
 body {
-  @apply text-slate-900;
+  @apply min-h-screen bg-slate-950 text-slate-100;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  background-image: radial-gradient(circle at 20% -10%, rgba(34, 211, 238, 0.16), transparent 40%), radial-gradient(circle at 90% 0%, rgba(99, 102, 241, 0.18), transparent 35%), linear-gradient(180deg, #020617 0%, #0f172a 100%);
+}
+
+#root {
+  @apply min-h-screen;
 }

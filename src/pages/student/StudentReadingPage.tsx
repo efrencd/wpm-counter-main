@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { calculateWpm, computeAccuracy, tokenizeWords } from '../../lib/textMetrics';
+import { calculateWpm, computeAccuracy, normalizeSpanishText, tokenizeWords } from '../../lib/textMetrics';
 import { getStudentSession, saveLastResult } from '../../lib/studentSession';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 
@@ -10,6 +10,87 @@ interface AssignedText {
   content: string;
 }
 
+interface ComparedToken {
+  raw: string;
+  isWord: boolean;
+  missed: boolean;
+}
+
+function normalizeWord(token: string): string {
+  return normalizeSpanishText(token);
+}
+
+function buildComparedTokens(referenceText: string, hypothesisText: string): ComparedToken[] {
+  const rawTokens = referenceText.split(/\s+/).filter(Boolean);
+  const normalizedRawTokens = rawTokens.map(normalizeWord);
+  const hypothesisWords = tokenizeWords(hypothesisText);
+
+  const referenceWords: string[] = [];
+  const wordPositionByRawToken = new Array<number>(rawTokens.length).fill(-1);
+
+  normalizedRawTokens.forEach((token, rawIndex) => {
+    if (!token) return;
+    wordPositionByRawToken[rawIndex] = referenceWords.length;
+    referenceWords.push(token);
+  });
+
+  const rows = referenceWords.length + 1;
+  const cols = hypothesisWords.length + 1;
+  const dp: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const substitutionCost = referenceWords[i - 1] === hypothesisWords[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + substitutionCost,
+      );
+    }
+  }
+
+  const matchedReference = new Array(referenceWords.length).fill(false);
+  let i = referenceWords.length;
+  let j = hypothesisWords.length;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0) {
+      const substitutionCost = referenceWords[i - 1] === hypothesisWords[j - 1] ? 0 : 1;
+      if (dp[i][j] === dp[i - 1][j - 1] + substitutionCost) {
+        if (substitutionCost === 0) matchedReference[i - 1] = true;
+        i -= 1;
+        j -= 1;
+        continue;
+      }
+    }
+
+    if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) {
+      i -= 1;
+      continue;
+    }
+
+    if (j > 0 && dp[i][j] === dp[i][j - 1] + 1) {
+      j -= 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return rawTokens.map((raw, rawIndex) => {
+    const wordPosition = wordPositionByRawToken[rawIndex];
+    const isWord = wordPosition >= 0;
+    return {
+      raw,
+      isWord,
+      missed: isWord ? !matchedReference[wordPosition] : false,
+    };
+  });
+}
+
 export default function StudentReadingPage() {
   const navigate = useNavigate();
   const [text, setText] = useState<AssignedText | null>(null);
@@ -17,6 +98,8 @@ export default function StudentReadingPage() {
   const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [finished, setFinished] = useState(false);
+  const [comparedTokens, setComparedTokens] = useState<ComparedToken[]>([]);
   const { supported, transcript, listening, error, start, stop, reset } = useSpeechRecognition();
 
   const session = useMemo(() => getStudentSession(), []);
@@ -33,10 +116,12 @@ export default function StudentReadingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: session.token }),
       });
+
       if (!response.ok) {
-        setMessage('No se encontró texto asignado.');
+        setMessage('No se encontro texto asignado.');
         return;
       }
+
       const payload = (await response.json()) as { text: AssignedText };
       setText(payload.text);
     })();
@@ -44,9 +129,11 @@ export default function StudentReadingPage() {
 
   useEffect(() => {
     if (!startedAt || !listening) return;
+
     const timer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000));
     }, 500);
+
     return () => clearInterval(timer);
   }, [listening, startedAt]);
 
@@ -56,11 +143,14 @@ export default function StudentReadingPage() {
     reset();
     setStartedAt(new Date());
     setElapsed(0);
+    setFinished(false);
+    setComparedTokens([]);
     start();
   };
 
   const handleStop = async () => {
     if (!startedAt || !text) return;
+
     stop();
     const endedAt = new Date();
     const durationSeconds = Math.max(1, Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000));
@@ -70,6 +160,7 @@ export default function StudentReadingPage() {
     const invalidShort = durationSeconds < 10;
 
     setSaving(true);
+
     const payload = {
       class_id: session.class_id,
       student_id: session.student_id,
@@ -91,28 +182,60 @@ export default function StudentReadingPage() {
     });
 
     saveLastResult({ wpm, accuracy, duration_seconds: durationSeconds, invalid_short: invalidShort });
+    setComparedTokens(buildComparedTokens(text.content, transcript));
+    setFinished(true);
     setSaving(false);
-    navigate('/student/results');
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-xl bg-white p-6 shadow-sm">
-      <h2 className="text-xl font-semibold">Lectura en voz alta</h2>
-      {!supported && <p className="rounded bg-amber-100 p-3 text-sm">Tu navegador no soporta Web Speech API. En Chrome para Chromebook debería funcionar.</p>}
-      {text ? (
-        <article className="rounded border p-4">
-          <h3 className="font-medium">{text.title}</h3>
-          <p className="mt-2 leading-relaxed">{text.content}</p>
-        </article>
-      ) : <p>Cargando texto...</p>}
-      <div className="flex items-center gap-4">
-        <button className="rounded bg-green-600 px-4 py-2 text-white" onClick={handleStart} disabled={!supported || listening}>Start</button>
-        <button className="rounded bg-red-600 px-4 py-2 text-white" onClick={handleStop} disabled={!listening || saving}>Stop</button>
-        <p className="text-sm">Tiempo: {elapsed}s</p>
-        {listening && <p className="text-sm text-green-700">Escuchando…</p>}
+    <div className="mx-auto max-w-4xl space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/40">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-2xl font-bold text-white">Lectura en voz alta</h2>
+        <p className="text-sm text-slate-400">Tiempo: <span className="font-semibold text-cyan-300">{elapsed}s</span></p>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {message && <p className="text-sm text-amber-700">{message}</p>}
+      <p className="text-sm text-slate-300">Bienvenido {session.student_name}.</p>
+
+      {!supported && <p className="rounded-xl border border-amber-700/40 bg-amber-950/50 p-3 text-sm text-amber-200">Tu navegador no soporta Web Speech API. Usa Chrome para mejor compatibilidad.</p>}
+
+      {text ? (
+        <article className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+          <h3 className="text-lg font-semibold text-cyan-300">{text.title}</h3>
+          <p className="mt-3 whitespace-pre-wrap leading-relaxed text-slate-200">{text.content}</p>
+        </article>
+      ) : (
+        <p className="text-slate-400">Cargando texto...</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button className="rounded-xl bg-emerald-500 px-4 py-2 font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStart} disabled={!supported || listening || saving}>Iniciar</button>
+        <button className="rounded-xl bg-rose-500 px-4 py-2 font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStop} disabled={!listening || saving}>Detener</button>
+        {listening && <p className="text-sm font-medium text-emerald-300">Escuchando...</p>}
+      </div>
+
+      <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Transcripcion detectada</h3>
+        <p className="mt-2 min-h-10 whitespace-pre-wrap text-slate-200">{transcript || 'Empieza a leer para ver el texto detectado en tiempo real.'}</p>
+      </section>
+
+      {finished && text && (
+        <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Revision del texto original</h3>
+          <p className="mt-2 leading-relaxed">
+            {comparedTokens.map((token, index) => (
+              <span key={`${token.raw}-${index}`} className={token.missed ? 'text-rose-400 font-semibold' : 'text-slate-200'}>
+                {token.raw}{' '}
+              </span>
+            ))}
+          </p>
+          <p className="mt-3 text-xs text-slate-400">Las palabras en rojo son las no detectadas correctamente.</p>
+          <button className="mt-4 rounded-xl bg-indigo-500 px-4 py-2 font-semibold text-white transition hover:bg-indigo-400" onClick={() => navigate('/student/results')}>
+            Ver resultado final
+          </button>
+        </section>
+      )}
+
+      {error && <p className="rounded-lg border border-rose-700/40 bg-rose-950/40 p-2 text-sm text-rose-300">{error}</p>}
+      {message && <p className="rounded-lg border border-amber-700/40 bg-amber-950/40 p-2 text-sm text-amber-300">{message}</p>}
     </div>
   );
 }

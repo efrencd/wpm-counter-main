@@ -6,7 +6,19 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
-create type public.membership_role as enum ('owner', 'teacher');
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where t.typname = 'membership_role'
+      and n.nspname = 'public'
+  ) then
+    create type public.membership_role as enum ('owner', 'teacher');
+  end if;
+end
+$$;
 
 create table if not exists public.classes (
   id uuid primary key default gen_random_uuid(),
@@ -31,10 +43,14 @@ create table if not exists public.students (
   class_id uuid not null references public.classes(id) on delete cascade,
   display_name text not null,
   pin_hash text not null,
+  pin_plain varchar(4),
   active boolean not null default true,
   created_at timestamptz not null default now(),
   unique(class_id, display_name)
 );
+
+alter table public.students
+  add column if not exists pin_plain varchar(4);
 
 create table if not exists public.texts (
   id uuid primary key default gen_random_uuid(),
@@ -74,9 +90,19 @@ create table if not exists public.student_sessions (
   created_at timestamptz not null default now()
 );
 
-alter table public.classes
-  add constraint classes_active_text_fkey
-  foreign key (active_text_id) references public.texts(id) on delete set null;
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'classes_active_text_fkey'
+  ) then
+    alter table public.classes
+      add constraint classes_active_text_fkey
+      foreign key (active_text_id) references public.texts(id) on delete set null;
+  end if;
+end
+$$;
 
 create index if not exists idx_reading_sessions_student_started
   on public.reading_sessions(student_id, started_at desc);
@@ -100,6 +126,8 @@ begin
   return new;
 end;
 $$;
+
+drop trigger if exists trg_texts_updated_at on public.texts;
 
 create trigger trg_texts_updated_at
 before update on public.texts

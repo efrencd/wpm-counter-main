@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { fail, ok } from './_shared/http';
+import { getMethod, getRawBody } from './_shared/request';
 import { hashToken } from './_shared/security';
-import { supabaseAdmin } from './_shared/supabaseAdmin';
+import { getSupabaseAdmin } from './_shared/supabaseAdmin';
 
 const payloadSchema = z.object({
   class_id: z.string().uuid(),
@@ -23,8 +24,9 @@ const schema = z.object({
 });
 
 export async function handler(event: { body: string | null; httpMethod: string }) {
-  if (event.httpMethod !== 'POST') return fail('Method not allowed', 405);
-  const parsed = schema.safeParse(JSON.parse(event.body ?? '{}'));
+  const supabaseAdmin = getSupabaseAdmin();
+  if (getMethod(event) !== 'POST') return fail('Method not allowed', 405);
+  const parsed = schema.safeParse(JSON.parse(await getRawBody(event)));
   if (!parsed.success) return fail('Invalid payload', 422);
 
   const tokenHash = hashToken(parsed.data.token);

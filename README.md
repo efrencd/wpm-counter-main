@@ -23,11 +23,17 @@ npm install
 npm run dev
 ```
 
+Si vas a probar flujo de alumnado (usa Netlify Functions), inicia en local con:
+```bash
+npm run dev:netlify
+```
+
 ## Configuración Supabase
 1. Crea proyecto en Supabase.
 2. En SQL editor ejecuta:
    - `supabase/schema.sql`
    - `supabase/policies.sql`
+   - Si ya tenías tablas creadas, vuelve a ejecutar `supabase/schema.sql` para añadir columnas nuevas (por ejemplo `students.pin_plain`).
 3. Crea usuarios docentes en Auth.
 4. Para cada alumno, el hash del PIN se calcula en Netlify Functions con bcrypt.
 
