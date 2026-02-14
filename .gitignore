@@ -1,0 +1,12 @@
+node_modules
+dist
+*.tsbuildinfo
+
+# prevent accidental Netlify function build artifacts
+netlify/functions/**/*.js
+netlify/functions/**/*.d.ts
+
+# env files
+.env
+.env.*
+!.env.example
