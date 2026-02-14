@@ -5,6 +5,8 @@ dist
 # prevent accidental Netlify function build artifacts
 netlify/functions/**/*.js
 netlify/functions/**/*.d.ts
+netlify/functions-src/**/*.js
+netlify/functions-src/**/*.d.ts
 
 # env files
 .env
