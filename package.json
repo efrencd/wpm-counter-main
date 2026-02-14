@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:netlify": "npx netlify dev",
-    "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
+    "clean:function-dts": "node -e \"const fs=require('fs');const path=require('path');const roots=['netlify/functions','netlify/functions-src'];const walk=(dir)=>{if(!fs.existsSync(dir))return;for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else if(e.name.endsWith('.d.ts')){try{fs.unlinkSync(p)}catch{}}}};for(const r of roots)walk(r);\"",
+    "build": "npm run clean:function-dts && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit"
