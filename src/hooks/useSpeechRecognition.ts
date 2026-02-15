@@ -24,6 +24,40 @@ interface UseSpeechRecognitionResult {
   reset: () => void;
 }
 
+function normalizeForMerge(text: string): string[] {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.toLowerCase());
+}
+
+function mergeByWordOverlap(previousText: string, incomingText: string): string {
+  const previous = previousText.trim();
+  const incoming = incomingText.trim();
+
+  if (!previous) return incoming;
+  if (!incoming) return previous;
+  if (previous.endsWith(incoming)) return previous;
+  if (incoming.endsWith(previous)) return incoming;
+
+  const previousWords = previous.split(/\s+/).filter(Boolean);
+  const incomingWords = incoming.split(/\s+/).filter(Boolean);
+  const previousNormalized = normalizeForMerge(previous);
+  const incomingNormalized = normalizeForMerge(incoming);
+  const maxOverlap = Math.min(previousWords.length, incomingWords.length);
+
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const previousSlice = previousNormalized.slice(previousNormalized.length - overlap).join(' ');
+    const incomingSlice = incomingNormalized.slice(0, overlap).join(' ');
+    if (previousSlice === incomingSlice) {
+      return `${previous} ${incomingWords.slice(overlap).join(' ')}`.trim();
+    }
+  }
+
+  return `${previous} ${incoming}`.trim();
+}
+
 export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRecognitionResult {
   const [transcript, setTranscript] = useState('');
   const [finalTranscript, setFinalTranscript] = useState('');
@@ -66,7 +100,7 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
       }
 
       if (finalChunk) {
-        finalTranscriptRef.current = `${finalTranscriptRef.current} ${finalChunk}`.trim();
+        finalTranscriptRef.current = mergeByWordOverlap(finalTranscriptRef.current, finalChunk);
         setFinalTranscript(finalTranscriptRef.current);
       }
 
