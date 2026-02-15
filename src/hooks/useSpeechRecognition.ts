@@ -154,7 +154,10 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
 
   const ensureInstance = useCallback(() => {
     if (!Recognition) return null;
-    if (recognitionRef.current) return recognitionRef.current;
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = lang;
+      return recognitionRef.current;
+    }
 
     const recognition = new Recognition();
     recognition.lang = lang;
@@ -248,6 +251,7 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
     clearRestartTimer();
     restartAttemptsRef.current = 0;
     setError(null);
+    recognition.lang = lang;
     try {
       recognition.start();
       setListening(true);
@@ -255,7 +259,7 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
       // Ignore transient InvalidStateError when start is called too quickly.
       setListening(true);
     }
-  }, [clearRestartTimer, ensureInstance]);
+  }, [clearRestartTimer, ensureInstance, lang]);
 
   const stop = useCallback(() => {
     shouldKeepListeningRef.current = false;

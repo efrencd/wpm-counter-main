@@ -10,6 +10,9 @@ interface AssignedText {
   content: string;
 }
 
+type SpeechLang = 'es-ES' | 'en-US';
+type SpeechLangMode = 'auto' | SpeechLang;
+
 interface ComparedToken {
   raw: string;
   isWord: boolean;
@@ -18,6 +21,29 @@ interface ComparedToken {
 
 function normalizeWord(token: string): string {
   return normalizeSpanishText(token);
+}
+
+function inferSpeechLangFromText(content: string): SpeechLang {
+  const normalized = content.toLowerCase();
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'es-ES';
+
+  const spanishMarkers = [' el ', ' la ', ' los ', ' las ', ' de ', ' que ', ' y ', ' un ', ' una ', ' en ', ' por ', ' para ', ' con ', ' del ', ' al ', ' está ', ' tenía ', ' había ', ' dónde ', '¿', '¡', 'ñ', 'á', 'é', 'í', 'ó', 'ú'];
+  const englishMarkers = [' the ', ' and ', ' to ', ' of ', ' in ', ' is ', ' was ', ' were ', ' are ', ' with ', ' from ', ' for ', ' where ', ' called ', ' day ', ' behind ', ' park ', ' dog '];
+
+  let spanishScore = 0;
+  let englishScore = 0;
+
+  for (const marker of spanishMarkers) {
+    if (normalized.includes(marker)) spanishScore += 1;
+  }
+
+  for (const marker of englishMarkers) {
+    if (normalized.includes(marker)) englishScore += 1;
+  }
+
+  if (englishScore > spanishScore) return 'en-US';
+  return 'es-ES';
 }
 
 function buildComparedTokens(referenceText: string, hypothesisText: string): ComparedToken[] {
@@ -101,6 +127,11 @@ export default function StudentReadingPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
   const [comparedTokens, setComparedTokens] = useState<ComparedToken[]>([]);
+  const [speechLangMode, setSpeechLangMode] = useState<SpeechLangMode>('auto');
+  const resolvedSpeechLang = useMemo<SpeechLang>(() => {
+    if (speechLangMode !== 'auto') return speechLangMode;
+    return inferSpeechLangFromText(text?.content ?? '');
+  }, [speechLangMode, text?.content]);
   const {
     supported,
     transcript,
@@ -112,7 +143,7 @@ export default function StudentReadingPage() {
     debugEvents,
     finalTranscript,
     interimTranscript,
-  } = useSpeechRecognition('es-ES', speechDebug);
+  } = useSpeechRecognition(resolvedSpeechLang, speechDebug);
 
   const session = useMemo(() => getStudentSession(), []);
 
@@ -217,6 +248,16 @@ export default function StudentReadingPage() {
           <button className="rounded-xl bg-rose-500 px-4 py-2 font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStop} disabled={!listening || saving}>
             Detener
           </button>
+          <select
+            className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-200 outline-none focus:border-cyan-400"
+            value={speechLangMode}
+            onChange={(event) => setSpeechLangMode(event.target.value as SpeechLangMode)}
+            disabled={listening}
+          >
+            <option value="auto">Auto ({resolvedSpeechLang})</option>
+            <option value="es-ES">Español (es-ES)</option>
+            <option value="en-US">English (en-US)</option>
+          </select>
           {listening && <p className="text-sm font-medium text-emerald-300">Escuchando...</p>}
           <button className="ml-auto rounded-xl border border-rose-700/50 px-3 py-2 text-sm font-medium text-rose-300 transition hover:bg-rose-950/40" onClick={handleLogout}>
             Logout alumno
