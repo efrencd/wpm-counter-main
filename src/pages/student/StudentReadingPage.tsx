@@ -92,6 +92,7 @@ function buildComparedTokens(referenceText: string, hypothesisText: string): Com
 }
 
 export default function StudentReadingPage() {
+  const speechDebug = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('speechDebug') === '1';
   const navigate = useNavigate();
   const [text, setText] = useState<AssignedText | null>(null);
   const [startedAt, setStartedAt] = useState<Date | null>(null);
@@ -100,7 +101,18 @@ export default function StudentReadingPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
   const [comparedTokens, setComparedTokens] = useState<ComparedToken[]>([]);
-  const { supported, transcript, listening, error, start, stop, reset } = useSpeechRecognition();
+  const {
+    supported,
+    transcript,
+    listening,
+    error,
+    start,
+    stop,
+    reset,
+    debugEvents,
+    finalTranscript,
+    interimTranscript,
+  } = useSpeechRecognition('es-ES', speechDebug);
 
   const session = useMemo(() => getStudentSession(), []);
 
@@ -216,6 +228,30 @@ export default function StudentReadingPage() {
         <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Transcripcion detectada</h3>
         <p className="mt-2 min-h-10 whitespace-pre-wrap text-slate-200">{transcript || 'Empieza a leer para ver el texto detectado en tiempo real.'}</p>
       </section>
+
+      {speechDebug && (
+        <section className="rounded-xl border border-amber-700/40 bg-amber-950/30 p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-amber-300">Speech Debug</h3>
+          <p className="mt-2 text-xs text-amber-100/90">Activa este modo con <span className="font-mono">?speechDebug=1</span>.</p>
+          <p className="mt-2 text-xs text-amber-200">Final: {finalTranscript || '(vacio)'}</p>
+          <p className="mt-1 text-xs text-amber-200">Interim: {interimTranscript || '(vacio)'}</p>
+          <div className="mt-3 max-h-40 overflow-auto rounded border border-amber-700/40 bg-slate-950/50 p-2">
+            {debugEvents.length === 0 ? (
+              <p className="text-xs text-amber-100/70">Sin eventos todavía.</p>
+            ) : (
+              <ul className="space-y-2 text-xs text-amber-100/90">
+                {debugEvents.map((event, index) => (
+                  <li key={`${event.timestamp}-${index}`} className="rounded border border-amber-700/30 p-2">
+                    <p className="font-mono">t={event.timestamp} idx={event.resultIndex} len={event.resultsLength}</p>
+                    <p>final: {event.finalChunk || '(vacio)'}</p>
+                    <p>interim: {event.interimChunk || '(vacio)'}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
 
       {finished && text && (
         <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
