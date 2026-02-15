@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type BrowserSpeechRecognition = typeof window.SpeechRecognition;
 
@@ -24,12 +24,19 @@ interface UseSpeechRecognitionResult {
   reset: () => void;
 }
 
+function tokenize(text: string): string[] {
+  return text.trim().split(/\s+/).filter(Boolean);
+}
+
 function normalizeForMerge(text: string): string[] {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((token) => token.toLowerCase());
+  return tokenize(text).map((token) => token.toLowerCase());
+}
+
+function countPrefixMatch(base: string[], probe: string[]): number {
+  let matched = 0;
+  const max = Math.min(base.length, probe.length);
+  while (matched < max && base[matched] === probe[matched]) matched += 1;
+  return matched;
 }
 
 function mergeByWordOverlap(previousText: string, incomingText: string): string {
@@ -41,17 +48,42 @@ function mergeByWordOverlap(previousText: string, incomingText: string): string 
   if (previous.endsWith(incoming)) return previous;
   if (incoming.endsWith(previous)) return incoming;
 
-  const previousWords = previous.split(/\s+/).filter(Boolean);
-  const incomingWords = incoming.split(/\s+/).filter(Boolean);
+  const previousWords = tokenize(previous);
+  const incomingWords = tokenize(incoming);
   const previousNormalized = normalizeForMerge(previous);
   const incomingNormalized = normalizeForMerge(incoming);
   const maxOverlap = Math.min(previousWords.length, incomingWords.length);
+  const headSkipWindow = Math.min(3, Math.max(0, incomingWords.length - 1));
 
-  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-    const previousSlice = previousNormalized.slice(previousNormalized.length - overlap).join(' ');
-    const incomingSlice = incomingNormalized.slice(0, overlap).join(' ');
-    if (previousSlice === incomingSlice) {
-      return `${previous} ${incomingWords.slice(overlap).join(' ')}`.trim();
+  // Chrome Android can prepend one or more stray tokens and then replay a full chunk.
+  // This tries to find overlap allowing a small skip at the beginning of incoming.
+  for (let headSkip = 0; headSkip <= headSkipWindow; headSkip += 1) {
+    const candidate = incomingNormalized.slice(headSkip);
+    const candidateWords = incomingWords.slice(headSkip);
+    const candidateMaxOverlap = Math.min(previousWords.length, candidateWords.length);
+
+    for (let overlap = candidateMaxOverlap; overlap > 0; overlap -= 1) {
+      const previousSlice = previousNormalized.slice(previousNormalized.length - overlap).join(' ');
+      const incomingSlice = candidate.slice(0, overlap).join(' ');
+      if (previousSlice === incomingSlice) {
+        return `${previous} ${candidateWords.slice(overlap).join(' ')}`.trim();
+      }
+    }
+  }
+
+  // Replay detection: incoming repeats the beginning of the session with little/no new tail.
+  for (let headSkip = 0; headSkip <= headSkipWindow; headSkip += 1) {
+    const candidate = incomingNormalized.slice(headSkip);
+    const candidateWords = incomingWords.slice(headSkip);
+    if (candidate.length < 12 || previousNormalized.length < 12) continue;
+
+    const prefixMatch = countPrefixMatch(previousNormalized, candidate);
+    const candidateCoverage = prefixMatch / candidate.length;
+    const previousCoverage = prefixMatch / previousNormalized.length;
+
+    if (candidateCoverage >= 0.8 && previousCoverage >= 0.6) {
+      const tail = candidateWords.slice(prefixMatch).join(' ');
+      return tail ? `${previous} ${tail}`.trim() : previous;
     }
   }
 
@@ -103,6 +135,9 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
   const [debugEvents, setDebugEvents] = useState<SpeechDebugEvent[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const finalTranscriptRef = useRef('');
+  const shouldKeepListeningRef = useRef(false);
+  const restartTimerRef = useRef<number | null>(null);
+  const restartAttemptsRef = useRef(0);
 
   const Recognition = useMemo(() => {
     return (window.SpeechRecognition || window.webkitSpeechRecognition) as BrowserSpeechRecognition | undefined;
@@ -110,13 +145,20 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
 
   const supported = Boolean(Recognition);
 
+  const clearRestartTimer = useCallback(() => {
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }, []);
+
   const ensureInstance = useCallback(() => {
     if (!Recognition) return null;
     if (recognitionRef.current) return recognitionRef.current;
 
     const recognition = new Recognition();
     recognition.lang = lang;
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.interimResults = true;
 
     recognition.onresult = (event) => {
@@ -146,6 +188,7 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
 
       const combined = collapseRunawayRepeats(`${finalTranscriptRef.current} ${interim}`.trim());
       setTranscript(combined);
+      restartAttemptsRef.current = 0;
 
       if (debug) {
         const debugEvent: SpeechDebugEvent = {
@@ -163,15 +206,37 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
 
     recognition.onerror = (event) => {
       setError(event.error ?? 'Error de reconocimiento');
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') {
+        shouldKeepListeningRef.current = false;
+        clearRestartTimer();
+        setListening(false);
+      }
     };
 
     recognition.onend = () => {
-      setListening(false);
+      if (!shouldKeepListeningRef.current) {
+        setListening(false);
+        return;
+      }
+
+      clearRestartTimer();
+      const delay = Math.min(1600, 150 * (restartAttemptsRef.current + 1));
+      restartAttemptsRef.current += 1;
+
+      restartTimerRef.current = window.setTimeout(() => {
+        if (!shouldKeepListeningRef.current) return;
+        try {
+          recognition.start();
+          setListening(true);
+        } catch {
+          // If engine is not ready yet, onend/onerror will trigger next retry.
+        }
+      }, delay);
     };
 
     recognitionRef.current = recognition;
     return recognition;
-  }, [Recognition, lang]);
+  }, [Recognition, clearRestartTimer, debug, lang]);
 
   const start = useCallback(() => {
     const recognition = ensureInstance();
@@ -179,24 +244,46 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
       setError('Este navegador no soporta Web Speech API.');
       return;
     }
+    shouldKeepListeningRef.current = true;
+    clearRestartTimer();
+    restartAttemptsRef.current = 0;
     setError(null);
-    setListening(true);
-    recognition.start();
-  }, [ensureInstance]);
+    try {
+      recognition.start();
+      setListening(true);
+    } catch {
+      // Ignore transient InvalidStateError when start is called too quickly.
+      setListening(true);
+    }
+  }, [clearRestartTimer, ensureInstance]);
 
   const stop = useCallback(() => {
+    shouldKeepListeningRef.current = false;
+    clearRestartTimer();
+    restartAttemptsRef.current = 0;
     recognitionRef.current?.stop();
     setListening(false);
-  }, []);
+  }, [clearRestartTimer]);
 
   const reset = useCallback(() => {
+    shouldKeepListeningRef.current = false;
+    clearRestartTimer();
+    restartAttemptsRef.current = 0;
     finalTranscriptRef.current = '';
     setTranscript('');
     setFinalTranscript('');
     setInterimTranscript('');
     setDebugEvents([]);
     setError(null);
-  }, []);
+  }, [clearRestartTimer]);
+
+  useEffect(() => {
+    return () => {
+      shouldKeepListeningRef.current = false;
+      clearRestartTimer();
+      recognitionRef.current?.stop();
+    };
+  }, [clearRestartTimer]);
 
   return { supported, transcript, listening, error, debugEvents, finalTranscript, interimTranscript, start, stop, reset };
 }
