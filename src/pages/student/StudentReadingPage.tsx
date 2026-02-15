@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { calculateWpm, computeAccuracy, normalizeSpanishText, tokenizeWords } from '../../lib/textMetrics';
-import { getStudentSession, saveLastResult } from '../../lib/studentSession';
+import { clearStudentSession, getStudentSession, saveLastResult } from '../../lib/studentSession';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 
 interface AssignedText {
@@ -160,6 +160,11 @@ export default function StudentReadingPage() {
     start();
   };
 
+  const handleLogout = () => {
+    clearStudentSession();
+    navigate('/student');
+  };
+
   const handleStop = async () => {
     if (!startedAt || !text) return;
 
@@ -200,78 +205,89 @@ export default function StudentReadingPage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/40">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold text-white">Lectura en voz alta</h2>
-        <p className="text-sm text-slate-400">Tiempo: <span className="font-semibold text-cyan-300">{elapsed}s</span></p>
-      </div>
-      <p className="text-sm text-slate-300">Bienvenido {session.student_name}.</p>
-
-      {!supported && <p className="rounded-xl border border-amber-700/40 bg-amber-950/50 p-3 text-sm text-amber-200">Tu navegador no soporta Web Speech API. Usa Chrome para mejor compatibilidad.</p>}
-
-      {text ? (
-        <article className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-          <h3 className="text-lg font-semibold text-cyan-300">{text.title}</h3>
-          <p className="mt-3 whitespace-pre-wrap leading-relaxed text-slate-200">{text.content}</p>
-        </article>
-      ) : (
-        <p className="text-slate-400">Cargando texto...</p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button className="rounded-xl bg-emerald-500 px-4 py-2 font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStart} disabled={!supported || listening || saving}>Iniciar</button>
-        <button className="rounded-xl bg-rose-500 px-4 py-2 font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStop} disabled={!listening || saving}>Detener</button>
-        {listening && <p className="text-sm font-medium text-emerald-300">Escuchando...</p>}
-      </div>
-
-      <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Transcripcion detectada</h3>
-        <p className="mt-2 min-h-10 whitespace-pre-wrap text-slate-200">{transcript || 'Empieza a leer para ver el texto detectado en tiempo real.'}</p>
+    <div className="mx-auto max-w-4xl">
+      <section className="fixed inset-x-0 top-0 z-30 border-b border-slate-800/80 bg-slate-950/95 backdrop-blur">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
+          <p className="rounded-lg border border-cyan-700/40 bg-cyan-950/40 px-3 py-2 text-sm text-cyan-200">
+            Tiempo: <span className="font-semibold">{elapsed}s</span>
+          </p>
+          <button className="rounded-xl bg-emerald-500 px-4 py-2 font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStart} disabled={!supported || listening || saving}>
+            Iniciar
+          </button>
+          <button className="rounded-xl bg-rose-500 px-4 py-2 font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50" onClick={handleStop} disabled={!listening || saving}>
+            Detener
+          </button>
+          {listening && <p className="text-sm font-medium text-emerald-300">Escuchando...</p>}
+          <button className="ml-auto rounded-xl border border-rose-700/50 px-3 py-2 text-sm font-medium text-rose-300 transition hover:bg-rose-950/40" onClick={handleLogout}>
+            Logout alumno
+          </button>
+        </div>
       </section>
 
-      {speechDebug && (
-        <section className="rounded-xl border border-amber-700/40 bg-amber-950/30 p-4">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-amber-300">Speech Debug</h3>
-          <p className="mt-2 text-xs text-amber-100/90">Activa este modo con <span className="font-mono">?speechDebug=1</span>.</p>
-          <p className="mt-2 text-xs text-amber-200">Final: {finalTranscript || '(vacio)'}</p>
-          <p className="mt-1 text-xs text-amber-200">Interim: {interimTranscript || '(vacio)'}</p>
-          <div className="mt-3 max-h-40 overflow-auto rounded border border-amber-700/40 bg-slate-950/50 p-2">
-            {debugEvents.length === 0 ? (
-              <p className="text-xs text-amber-100/70">Sin eventos todavía.</p>
-            ) : (
-              <ul className="space-y-2 text-xs text-amber-100/90">
-                {debugEvents.map((event, index) => (
-                  <li key={`${event.timestamp}-${index}`} className="rounded border border-amber-700/30 p-2">
-                    <p className="font-mono">t={event.timestamp} idx={event.resultIndex} len={event.resultsLength}</p>
-                    <p>final: {event.finalChunk || '(vacio)'}</p>
-                    <p>interim: {event.interimChunk || '(vacio)'}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
-      )}
+      <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 pt-28 shadow-2xl shadow-slate-950/40 sm:p-6 sm:pt-24">
+        <h2 className="text-2xl font-bold text-white">Lectura en voz alta</h2>
+        <p className="text-sm text-slate-300">Bienvenido {session.student_name}.</p>
 
-      {finished && text && (
+        {!supported && <p className="rounded-xl border border-amber-700/40 bg-amber-950/50 p-3 text-sm text-amber-200">Tu navegador no soporta Web Speech API. Usa Chrome para mejor compatibilidad.</p>}
+
+        {text ? (
+          <article className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <h3 className="text-lg font-semibold text-cyan-300">{text.title}</h3>
+            <p className="mt-3 whitespace-pre-wrap leading-relaxed text-slate-200">{text.content}</p>
+          </article>
+        ) : (
+          <p className="text-slate-400">Cargando texto...</p>
+        )}
+
         <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Revision del texto original</h3>
-          <p className="mt-2 leading-relaxed">
-            {comparedTokens.map((token, index) => (
-              <span key={`${token.raw}-${index}`} className={token.missed ? 'text-rose-400 font-semibold' : 'text-slate-200'}>
-                {token.raw}{' '}
-              </span>
-            ))}
-          </p>
-          <p className="mt-3 text-xs text-slate-400">Las palabras en rojo son las no detectadas correctamente.</p>
-          <button className="mt-4 rounded-xl bg-indigo-500 px-4 py-2 font-semibold text-white transition hover:bg-indigo-400" onClick={() => navigate('/student/results')}>
-            Ver resultado final
-          </button>
+          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Transcripcion detectada</h3>
+          <p className="mt-2 min-h-10 whitespace-pre-wrap text-slate-200">{transcript || 'Empieza a leer para ver el texto detectado en tiempo real.'}</p>
         </section>
-      )}
 
-      {error && <p className="rounded-lg border border-rose-700/40 bg-rose-950/40 p-2 text-sm text-rose-300">{error}</p>}
-      {message && <p className="rounded-lg border border-amber-700/40 bg-amber-950/40 p-2 text-sm text-amber-300">{message}</p>}
+        {speechDebug && (
+          <section className="rounded-xl border border-amber-700/40 bg-amber-950/30 p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-amber-300">Speech Debug</h3>
+            <p className="mt-2 text-xs text-amber-100/90">Activa este modo con <span className="font-mono">?speechDebug=1</span>.</p>
+            <p className="mt-2 text-xs text-amber-200">Final: {finalTranscript || '(vacio)'}</p>
+            <p className="mt-1 text-xs text-amber-200">Interim: {interimTranscript || '(vacio)'}</p>
+            <div className="mt-3 max-h-40 overflow-auto rounded border border-amber-700/40 bg-slate-950/50 p-2">
+              {debugEvents.length === 0 ? (
+                <p className="text-xs text-amber-100/70">Sin eventos todavia.</p>
+              ) : (
+                <ul className="space-y-2 text-xs text-amber-100/90">
+                  {debugEvents.map((event, index) => (
+                    <li key={`${event.timestamp}-${index}`} className="rounded border border-amber-700/30 p-2">
+                      <p className="font-mono">t={event.timestamp} idx={event.resultIndex} len={event.resultsLength}</p>
+                      <p>final: {event.finalChunk || '(vacio)'}</p>
+                      <p>interim: {event.interimChunk || '(vacio)'}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        )}
+
+        {finished && text && (
+          <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-indigo-300">Revision del texto original</h3>
+            <p className="mt-2 leading-relaxed">
+              {comparedTokens.map((token, index) => (
+                <span key={`${token.raw}-${index}`} className={token.missed ? 'text-rose-400 font-semibold' : 'text-slate-200'}>
+                  {token.raw}{' '}
+                </span>
+              ))}
+            </p>
+            <p className="mt-3 text-xs text-slate-400">Las palabras en rojo son las no detectadas correctamente.</p>
+            <button className="mt-4 rounded-xl bg-indigo-500 px-4 py-2 font-semibold text-white transition hover:bg-indigo-400" onClick={() => navigate('/student/results')}>
+              Ver resultado final
+            </button>
+          </section>
+        )}
+
+        {error && <p className="rounded-lg border border-rose-700/40 bg-rose-950/40 p-2 text-sm text-rose-300">{error}</p>}
+        {message && <p className="rounded-lg border border-amber-700/40 bg-amber-950/40 p-2 text-sm text-amber-300">{message}</p>}
+      </div>
     </div>
   );
 }

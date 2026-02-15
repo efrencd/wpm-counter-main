@@ -1,12 +1,22 @@
-import { Link } from 'react-router-dom';
-import { getLastResult } from '../../lib/studentSession';
+import { Link, useNavigate } from 'react-router-dom';
+import { clearStudentSession, getLastResult } from '../../lib/studentSession';
 
 export default function StudentResultsPage() {
+  const navigate = useNavigate();
   const result = getLastResult();
+  const handleLogout = () => {
+    clearStudentSession();
+    navigate('/student');
+  };
 
   return (
     <section className="mx-auto max-w-md rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/40">
-      <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Resultado</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Resultado</p>
+        <button className="rounded-lg border border-rose-700/50 px-3 py-2 text-xs font-medium text-rose-300 transition hover:bg-rose-950/40" onClick={handleLogout}>
+          Logout alumno
+        </button>
+      </div>
       <h2 className="mt-2 text-2xl font-bold text-white">Lectura completada</h2>
 
       {result ? (
