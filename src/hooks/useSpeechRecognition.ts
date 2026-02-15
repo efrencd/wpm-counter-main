@@ -58,6 +58,42 @@ function mergeByWordOverlap(previousText: string, incomingText: string): string 
   return `${previous} ${incoming}`.trim();
 }
 
+function normalizeSpeechToken(token: string): string {
+  return token
+    .toLowerCase()
+    .replace(/[^a-z0-9áéíóúüñ]/gi, '');
+}
+
+function collapseRunawayRepeats(text: string, runawayThreshold = 6, maxConsecutive = 3): string {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '';
+
+  const output: string[] = [];
+  let index = 0;
+
+  while (index < tokens.length) {
+    const currentNormalized = normalizeSpeechToken(tokens[index]);
+    let end = index + 1;
+
+    while (end < tokens.length) {
+      const nextNormalized = normalizeSpeechToken(tokens[end]);
+      if (!currentNormalized || currentNormalized !== nextNormalized) break;
+      end += 1;
+    }
+
+    const runLength = end - index;
+    if (currentNormalized && runLength >= runawayThreshold) {
+      output.push(...tokens.slice(index, index + maxConsecutive));
+    } else {
+      output.push(...tokens.slice(index, end));
+    }
+
+    index = end;
+  }
+
+  return output.join(' ');
+}
+
 export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRecognitionResult {
   const [transcript, setTranscript] = useState('');
   const [finalTranscript, setFinalTranscript] = useState('');
@@ -100,14 +136,15 @@ export function useSpeechRecognition(lang = 'es-ES', debug = false): UseSpeechRe
       }
 
       if (finalChunk) {
-        finalTranscriptRef.current = mergeByWordOverlap(finalTranscriptRef.current, finalChunk);
+        const mergedFinal = mergeByWordOverlap(finalTranscriptRef.current, finalChunk);
+        finalTranscriptRef.current = collapseRunawayRepeats(mergedFinal);
         setFinalTranscript(finalTranscriptRef.current);
       }
 
       const interim = interimParts.join(' ').trim();
       setInterimTranscript(interim);
 
-      const combined = `${finalTranscriptRef.current} ${interim}`.trim();
+      const combined = collapseRunawayRepeats(`${finalTranscriptRef.current} ${interim}`.trim());
       setTranscript(combined);
 
       if (debug) {
